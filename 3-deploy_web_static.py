@@ -1,62 +1,75 @@
 #!/usr/bin/python3
-"""
-    Generate a .tgz archive from the contents of the web_static folder
-    Deploy it to the web servers
-"""
+# Fabfile to create and distribute an archive to a web server.
+import os.path
+from datetime import datetime
+from fabric.api import env
+from fabric.api import local
+from fabric.api import put
+from fabric.api import run
 
-from os.path import isfile
-from fabric.api import local, run, env, put
-import time
-env.hosts = ['35.196.21.97', '34.139.18.218']
+env.hosts = ['35.231.232.13', '3.92.138.255']
 
 
 def do_pack():
-    """
-        Generates a .tgz
-        Return: archive path
-    """
-    time_now = time.strftime("%Y%m%d%H%M%S")
-    try:
-        local("mkdir versions")
-        local("tar -cvzf versions/web_static_{}.tgz web_static/".
-              format(time_now))
-        return ("versions/web_static_{}.tgz".format(time_now))
-    except:
+    """Create a tar gzipped archive of the directory web_static."""
+    dt = datetime.utcnow()
+    file = "versions/web_static_{}{}{}{}{}{}.tgz".format(dt.year,
+                                                         dt.month,
+                                                         dt.day,
+                                                         dt.hour,
+                                                         dt.minute,
+                                                         dt.second)
+    if os.path.isdir("versions") is False:
+        if local("mkdir -p versions").failed is True:
+            return None
+    if local("tar -cvzf {} web_static".format(file)).failed is True:
         return None
+    return file
 
 
 def do_deploy(archive_path):
+    """Distributes an archive to a web server.
+    Args:
+        archive_path (str): The path of the archive to distribute.
+    Returns:
+        If the file doesn't exist at archive_path or an error occurs - False.
+        Otherwise - True.
     """
-    Puts the archive in the web server
-    Destination: /tmp/
-    Uncompressed in:
-        /data/web_static/releases/<archive filename without extension>
-    Archive is deleted from webserver after
-    Symbolic link is recreated to point to the folder mentioned above
-    Returns: True id all ops are done correctly
-    """
-    if (isfile(archive_path) is False):
+    if os.path.isfile(archive_path) is False:
         return False
-    try:
-        localp = archive_path.split("/")[-1]
-        new_folder = ("/data/web_static/releases/" + localp.split(".")[0])
-        put(archive_path, "/tmp")
-        run("mkdir {}".format(new_folder))
-        run("tar -xzf /tmp/{} -C {}".format(localp, new_folder))
-        run("rm /tmp/{}".format(localp))
-        run("mv {}/web_static/* {}/".format(new_folder, new_folder))
-        run("rm -rf {}/web_static".format(new_folder))
-        run("rm -rf /data/web_static/current")
-        run("ln -s {} /data/web_static/current".format(new_folder))
-        return True
-    except:
+    file = archive_path.split("/")[-1]
+    name = file.split(".")[0]
+
+    if put(archive_path, "/tmp/{}".format(file)).failed is True:
         return False
+    if run("rm -rf /data/web_static/releases/{}/".
+           format(name)).failed is True:
+        return False
+    if run("mkdir -p /data/web_static/releases/{}/".
+           format(name)).failed is True:
+        return False
+    if run("tar -xzf /tmp/{} -C /data/web_static/releases/{}/".
+           format(file, name)).failed is True:
+        return False
+    if run("rm /tmp/{}".format(file)).failed is True:
+        return False
+    if run("mv /data/web_static/releases/{}/web_static/* "
+           "/data/web_static/releases/{}/".format(name, name)).failed is True:
+        return False
+    if run("rm -rf /data/web_static/releases/{}/web_static".
+           format(name)).failed is True:
+        return False
+    if run("rm -rf /data/web_static/current").failed is True:
+        return False
+    if run("ln -s /data/web_static/releases/{}/ /data/web_static/current".
+           format(name)).failed is True:
+        return False
+    return True
 
 
 def deploy():
-    """
-    Calls do_pack() function then do_deploy
-    """
-    archive_path = do_pack()
-    if archive_path:
-        return do_deploy(archive_path)
+    """Create and distribute an archive to a web server."""
+    file = do_pack()
+    if file is None:
+        return False
+    return do_deploy(file)
